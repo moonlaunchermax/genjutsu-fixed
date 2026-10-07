@@ -414,7 +414,6 @@ class HiggsfieldCreator:
             self.proxy = await pick_proxy()
             self.reused_account = False
 
-        # FIX 1: Hardcode timezone based on proxy country code
         if self.proxy:
             if '-de-' in self.proxy:
                 proxy_tz = "Europe/Berlin"
@@ -468,10 +467,15 @@ class HiggsfieldCreator:
                 break
             await asyncio.sleep(1)
 
-        # FIX 2: Force the Peak solver if the cookie wasn't found
         if not cookie_found:
             await self._log("warn", "No cf_clearance cookie found after 30s. Forcing Peak solver...")
             try:
+                # Wait for the Turnstile widget to actually load into the DOM
+                await self.page.wait_for_selector(
+                    'div.cf-turnstile, iframe[src*="challenges.cloudflare.com"]',
+                    timeout=20000
+                )
+                await self._log("info", "Turnstile widget detected. Invoking Peak solver...")
                 proxy_for_solver = self.proxy
                 if proxy_for_solver and not proxy_for_solver.startswith("http"):
                     proxy_for_solver = "http://" + proxy_for_solver
