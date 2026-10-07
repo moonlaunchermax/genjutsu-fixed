@@ -24,7 +24,6 @@ from playwright.async_api import async_playwright, Page, BrowserContext, Locator
 from temp_mail import TempMail
 from database import save_account, get_account_with_credits, mark_used, mark_banned
 from proxy_manager import ProxyManager, load_proxy_list, COOLDOWN_SECONDS
-# NEW: Turnstile solver
 from playwright_turnstile import solve_turnstile
 
 log = logging.getLogger("creator")
@@ -38,7 +37,7 @@ VIDEO_DIR = Path(os.getenv("VIDEO_DIR", "/tmp/videos")); VIDEO_DIR.mkdir(parents
 PROXY_LIST = [p.strip() for p in os.getenv("PROXY_LIST", "").split(",") if p.strip()]
 HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
 RUN_TIMEOUT = int(os.getenv("RUN_TIMEOUT", "900"))
-PEAK_API_KEY = os.getenv("PEAK_API_KEY", "")  # Your Peak API key
+PEAK_API_KEY = os.getenv("PEAK_API_KEY", "")
 
 BROWSER_ARGS = [
     "--disable-blink-features=AutomationControlled",
@@ -61,9 +60,7 @@ BROWSER_ARGS = [
 MIN_ACTION_DELAY = float(os.getenv("MIN_ACTION_DELAY", "0.5"))
 MAX_ACTION_DELAY = float(os.getenv("MAX_ACTION_DELAY", "2.0"))
 STEALTH_MODE = False
-
 PROXY_POOL = ProxyManager(load_proxy_list())
-
 GLOBAL_ACCOUNT_DELAY = float(os.getenv("GLOBAL_ACCOUNT_DELAY", "450"))
 _last_account_time = 0.0
 
@@ -417,9 +414,18 @@ class HiggsfieldCreator:
             self.proxy = await pick_proxy()
             self.reused_account = False
 
-        proxy_info = PROXY_POOL.get_info(self.proxy) if self.proxy else None
-        proxy_tz = proxy_info.timezone if proxy_info else "America/New_York"
-        proxy_udd = proxy_info.user_data_dir if proxy_info else None
+        # FIX 1: Hardcode timezone based on proxy country code
+        if self.proxy:
+            if '-de-' in self.proxy:
+                proxy_tz = "Europe/Berlin"
+            elif '-uk-' in self.proxy:
+                proxy_tz = "Europe/London"
+            elif '-ca-' in self.proxy:
+                proxy_tz = "America/Toronto"
+            else:
+                proxy_tz = "America/New_York"
+        else:
+            proxy_tz = "America/New_York"
 
         await self._log("info", f"launching browser (proxy={'yes' if self.proxy else 'no'}, pool={PROXY_POOL.size}, tz={proxy_tz})")
         self._pw = await async_playwright().start()
@@ -452,21 +458,20 @@ class HiggsfieldCreator:
             await self._log("warn", f"goto failed: {e}")
 
         await self._log("info", "Waiting for Cloudflare clearance...")
+        cookie_found = False
         for _ in range(30):
             cookies = await self.ctx.cookies()
             cf_clearance = [c for c in cookies if c.get("name") == "cf_clearance"]
             if cf_clearance:
                 await self._log("ok", "Cloudflare clearance cookie obtained")
+                cookie_found = True
                 break
             await asyncio.sleep(1)
-        else:
-            await self._log("warn", "No cf_clearance cookie found after 30s")
 
-        # --- NEW: Solve Turnstile if Cloudflare challenge is present ---
-        if await self._detect_cloudflare():
-            await self._log("info", "Cloudflare challenge detected. Attempting to solve with Peak...")
+        # FIX 2: Force the Peak solver if the cookie wasn't found
+        if not cookie_found:
+            await self._log("warn", "No cf_clearance cookie found after 30s. Forcing Peak solver...")
             try:
-                # Pass the proxy to the solver so the token matches your browser's IP
                 proxy_for_solver = self.proxy
                 if proxy_for_solver and not proxy_for_solver.startswith("http"):
                     proxy_for_solver = "http://" + proxy_for_solver
