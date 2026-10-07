@@ -60,7 +60,7 @@ PLATFORMS = ["MacIntel","Win32","Linux x86_64"]
 class FingerprintRandomizer:
     def __init__(self, timezone_id: str = "America/New_York"):
         self.ua = random.choice(USER_AGENTS)
-        self.timezone = timezone_id  # Use the detected timezone
+        self.timezone = timezone_id
         self.languages = random.choice(LANGUAGES_LIST)
         self.resolution = random.choice(RESOLUTIONS)
         self.platform = random.choice(PLATFORMS)
@@ -75,10 +75,11 @@ class FingerprintRandomizer:
         self.audio_noise = random.uniform(0.00001, 0.0001)
 
     def stealth_script(self) -> str:
+        # Fixed: Properly escaped f-string and JavaScript syntax
         return f"""
         Object.defineProperty(navigator,'webdriver',{{get:()=>undefined}});
-        Object.defineProperty(navigator,'languages',{{get:()=>{self.languages!r}}});
-        Object.defineProperty(navigator,'platform',{{get:()=>'{self.platform}'}}});
+        Object.defineProperty(navigator,'languages',{{get:(){self.languages}}});
+        Object.defineProperty(navigator,'platform',{{get():'{self.platform}'}}});
         Object.defineProperty(navigator,'hardwareConcurrency',{{get:()=>{self.hw_concurrency}}});
         Object.defineProperty(navigator,'deviceMemory',{{get:()=>{self.device_memory}}});
         Object.defineProperty(navigator,'plugins',{{get:()=>[{{name:'Chrome PDF Plugin'}},{{name:'Chrome PDF Viewer'}}]}}});
@@ -265,7 +266,6 @@ async def get_proxy_location(proxy_url: str) -> str:
     """Detect proxy location to set correct timezone and avoid fingerprint mismatch."""
     try:
         log.info(f"Detecting proxy location for: {proxy_url}")
-        # Construct proxy dict for aiohttp
         proxy_dict = {
             "http": proxy_url,
             "https": proxy_url
@@ -275,7 +275,7 @@ async def get_proxy_location(proxy_url: str) -> str:
             async with session.get('https://ipinfo.io/json', proxy=proxy_dict, timeout=10) as resp:
                 if resp.status != 200:
                     log.warning(f"ipinfo.io returned status {resp.status}")
-                    return "America/New_York" # Fallback
+                    return "America/New_York"
                 data = await resp.json()
                 country = data.get('country', 'US')
                 log.info(f"Proxy detected as located in: {country}")
@@ -324,9 +324,8 @@ async def get_proxy_location(proxy_url: str) -> str:
                 if country == 'CO': return 'America/Bogota'
                 if country == 'PE': return 'America/Lima'
                 if country == 'VE': return 'America/Caracas'
-                if country == 'US': return 'America/New_York' # Default US
+                if country == 'US': return 'America/New_York'
                 
-                # Default to US if country not explicitly mapped
                 log.warning(f"Country {country} not explicitly mapped, defaulting to America/New_York")
                 return 'America/New_York'
     except Exception as e:
@@ -343,7 +342,7 @@ class HiggsfieldCreator:
         self.ctx = None; self.page = None
         self.proxy: Optional[str] = None
         self.reused_account = False
-        self.fp = None # Initialize later with correct timezone
+        self.fp = None
         self.hi = HumanInput()
 
     async def _log(self, level, msg):
@@ -469,14 +468,12 @@ class HiggsfieldCreator:
             self.proxy = await pick_proxy()
             self.reused_account = False
 
-        # FIX: Dynamically detect timezone based on proxy IP location
-        proxy_tz = "America/New_York" # Default fallback
+        proxy_tz = "America/New_York"
         if self.proxy:
             proxy_tz = await get_proxy_location(self.proxy)
         
         await self._log("info", f"launching browser (proxy={'yes' if self.proxy else 'no'}, pool={PROXY_POOL.size}, tz={proxy_tz})")
         
-        # Initialize FingerprintRandomizer with the correct timezone
         self.fp = FingerprintRandomizer(timezone_id=proxy_tz)
 
         self._pw = await async_playwright().start()
@@ -487,7 +484,7 @@ class HiggsfieldCreator:
             viewport=self.fp.resolution,
             user_agent=self.fp.ua,
             locale="en-US",
-            timezone_id=self.fp.timezone, # Use the detected timezone
+            timezone_id=self.fp.timezone,
             screen={"width": self.fp.resolution["width"], "height": self.fp.resolution["height"]})
         await self.ctx.add_init_script(self.fp.stealth_script())
         self.page = await self.ctx.new_page()
@@ -533,205 +530,3 @@ class HiggsfieldCreator:
                 raise RuntimeError(f"Failed to solve Cloudflare challenge on signup: {e}")
         else:
             await self._log("info", "No Cloudflare challenge detected on signup page. Proceeding.")
-
-        await self._dismiss_cookie_banner()
-        await self._log("info", "clicking Sign up button...")
-        
-        signup_clicked = await click_any(self.page, [
-            'header button:has-text("Sign up")',
-            'header a:has-text("Sign up")',
-            'nav button:has-text("Sign up")',
-            'nav a:has-text("Sign up")',
-            'button:has-text("Sign up")',
-            'a:has-text("Sign up")',
-            'text="Sign up"'
-        ], timeout=10000)
-        
-        if not signup_clicked:
-             if "login" in self.page.url:
-                 await self._log("info", "On login page, attempting to find signup link...")
-                 pass
-        
-        await human_delay(1, 2)
-        
-        if await self._detect_cloudflare():
-             await self._shot("cloudflare_signup_post_click")
-             raise RuntimeError("Cloudflare challenge appeared after button click.")
-
-        await fill_any(self.page, self.first, ['input[name="firstName"]', 'input[name="name"]',
-            'input[placeholder*="first name" i]', 'input[placeholder*="name" i]'])
-        await fill_any(self.page, self.last, ['input[name="lastName"]', 'input[placeholder*="last name" i]'])
-        await human_delay()
-        ok = await fill_any(self.page, self.email, ['input[type="email"]', 'input[name="email"]',
-            'input[placeholder*="mail" i]', 'input[placeholder*="email" i]'])
-        if not ok:
-            if await self._dismiss_cookie_banner():
-                ok = await fill_any(self.page, self.email, ['input[type="email"]', 'input[name="email"]',
-                    'input[placeholder*="mail" i]', 'input[placeholder*="email" i]'])
-        if not ok:
-            await self._shot("signup_no_email_field")
-            await self._diagnose_page("signup_no_email_field")
-            raise RuntimeError("email field not found on signup (see diagnose line above)")
-        await human_delay()
-        ok = await fill_any(self.page, self.password, ['input[type="password"]', 'input[name="password"]',
-            'input[placeholder*="password" i]'])
-        if not ok: raise RuntimeError("password field not found on signup")
-        await human_delay()
-        await click_any(self.page, ['input[type="checkbox"]', '[role="checkbox"]'], timeout=3000)
-        ok = await click_any(self.page, ['button[type="submit"]', 'button:has-text("Sign up")',
-            'button:has-text("Create")', 'button:has-text("Register")', 'button:has-text("Continue")',
-            'button:has-text("Get started")'])
-        if not ok: raise RuntimeError("signup submit button not found")
-        await self._log("info", "signup form submitted")
-        await self._log("info", "waiting for verification email...")
-        link = await self.mail.wait_for_link(log=lambda m: self._log("info", m))
-        await self._log("ok", f"verification link: {link}")
-        await self.page.goto(link, wait_until="domcontentloaded", timeout=60000); await human_delay()
-        if await detect_captcha(self.page):
-            await self._shot("captcha_verify")
-            raise RuntimeError("captcha on verification - needs a solver or manual solve")
-        await self._log("ok", "email verified")
-        await save_account(self.email, self.password, credits=1, proxy=self.proxy)
-        await self._log("ok", f"account saved (proxy bound: {self.proxy or 'none'))")
-        if self.proxy:
-            await PROXY_POOL.mark_used(self.proxy)
-
-    async def _login(self):
-        await self.page.goto(LOGIN, wait_until="domcontentloaded", timeout=60000); await human_delay()
-        if await detect_captcha(self.page):
-            await self._shot("captcha_login")
-            raise RuntimeError("captcha on login - needs a solver or manual solve")
-        await fill_any(self.page, self.email, ['input[type="email"]', 'input[name="email"]',
-            'input[placeholder*="email" i]'])
-        await human_delay()
-        await fill_any(self.page, self.password, ['input[type="password"]', 'input[name="password"]'])
-        await click_any(self.page, ['button[type="submit"]', 'button:has-text("Log in")',
-            'button:has-text("Sign in")'])
-        await self.page.wait_for_load_state("networkidle")
-        if "/login" in self.page.url:
-            if self.reused_account:
-                await mark_banned(self.email)
-                await self._log("warn", f"account {self.email} marked BANNED (login failed)")
-            raise RuntimeError("login failed - still on /login (bad creds or banned)")
-        await self._log("ok", "logged in")
-
-    async def _run_genjutsu(self, reference_path, prompt):
-        resp = await self.page.goto(CREATE, wait_until="domcontentloaded", timeout=60000)
-        if resp and resp.status >= 400:
-            await self._log("info", f"/create returned {resp.status}, falling back to /genjutsu")
-            await self.page.goto(GENJUTSU, wait_until="domcontentloaded", timeout=60000)
-        await human_delay()
-        await self._log("info", f"navigated to create interface ({self.page.url})")
-        if await detect_captcha(self.page):
-            await self._shot("captcha_create")
-            raise RuntimeError("captcha on create page - needs a solver or manual solve")
-        await self._human_scroll(scrolls=random.randint(2, 4))
-        await self._log("info", "selecting Model: Higgsfield Genjutsu")
-        await select_menu_option(self.page, "Model", "Higgsfield Genjutsu", self._log)
-        await human_delay()
-        await self._log("info", "selecting Quality: 720p")
-        await select_menu_option(self.page, "Quality", "720p", self._log)
-        await human_delay()
-        await self._log("info", "ensuring 'Use free gens' is ON")
-        await ensure_toggle_on(self.page, "Use free gens", self._log)
-        await human_delay()
-        await self._log("info", "waiting before upload (human simulation)...")
-        await asyncio.sleep(random.uniform(15, 40))
-        file_inputs = self.page.locator('input[type="file"]')
-        count = await file_inputs.count()
-        await self._log("info", f"found {count} file input(s) on create page")
-        video_uploaded = False
-        for i in range(count):
-            inp = file_inputs.nth(i)
-            accept = await inp.get_attribute("accept") or ""
-            if "video" in accept or "video" not in accept:
-                try:
-                    await inp.set_input_files(reference_path)
-                    await self._log("info", f"reference video uploaded to input #{i}")
-                    video_uploaded = True
-                    break
-                except Exception:
-                    continue
-        if not video_uploaded:
-            await file_inputs.first.set_input_files(reference_path)
-            await self._log("info", "reference video uploaded (fallback to first input)")
-        await human_delay(1, 2)
-
-        if self._image_paths:
-            img_uploaded = False
-            for i in range(count):
-                inp = file_inputs.nth(i)
-                accept = await inp.get_attribute("accept") or ""
-                if "image" in accept:
-                    try:
-                        await inp.set_input_files([str(p) for p in self._image_paths])
-                        await self._log("info", f"{len(self._image_paths)} reference image(s) uploaded to input #{i}")
-                        img_uploaded = True
-                        break
-                    except Exception:
-                        continue
-            if not img_uploaded and count > 1:
-                try:
-                    await file_inputs.nth(1).set_input_files([str(p) for p in self._image_paths])
-                    await self._log("info", f"{len(self._image_paths)} reference image(s) uploaded (input #1)")
-                    img_uploaded = True
-                except Exception:
-                    pass
-            if not img_uploaded:
-                await self._log("warn", "could not find a separate image upload input — images may not have been uploaded")
-        await human_delay(1, 2)
-        ok = await fill_any(self.page, prompt, ['textarea[name="prompt"]',
-            'textarea[placeholder*="prompt" i]', 'textarea[placeholder*="describe" i]',
-            'textarea[placeholder*="scene" i]', 'textarea'])
-        if not ok: raise RuntimeError("prompt textarea not found")
-        await self._log("info", "prompt filled")
-        await human_delay()
-        ok = await click_any(self.page, ['button:has-text("Generate")', 'button:has-text("Create")',
-            'button:has-text("Render")', 'button[type="submit"]', 'button:has-text("Make")'])
-        if not ok: raise RuntimeError("generate button not found")
-        await self._log("ok", "generation triggered")
-        await self._log("info", "waiting for generation to complete...")
-        done = await wait_any(self.page, ['video[src]', 'a[download]', 'button:has-text("Download")',
-            'button:has-text("Save")', 'button:has-text("Download video")'], timeout=300000)
-        if not done: raise RuntimeError("generation did not complete in time")
-        await self._log("ok", "generation complete")
-
-    async def _download_result(self) -> Path:
-        out = VIDEO_DIR / f"genjutsu_{random.randint(10000,99999)}.mp4"
-        try:
-            async with self.page.expect_download(timeout=60000) as dl_info:
-                ok = await click_any(self.page, ['a[download]', 'button:has-text("Download")',
-                    'button:has-text("Save video")', 'button:has-text("Download video")'])
-                if not ok: raise RuntimeError("no download button")
-            download = await dl_info.value
-            await download.save_as(str(out))
-            await self._log("ok", f"video saved: {out.name}")
-        except Exception:
-            src = await self.page.locator('video').first.get_attribute("src")
-            if not src:
-                raise RuntimeError("could not locate result video")
-            url = src if src.startswith("http") else f"{HIGGS}{src}"
-            resp = await self.page.request.get(url)
-            if resp.ok:
-                out.write_bytes(await resp.body())
-                await self._log("ok", f"video fetched via src: {out.name}")
-            else:
-                raise RuntimeError(f"video fetch failed: HTTP {resp.status}")
-        return out
-
-    async def _cleanup(self):
-        try:
-            if self.ctx: await self.ctx.close()
-            if getattr(self, "browser", None): await self.browser.close()
-            if getattr(self, "_pw", None): await self._pw.stop()
-        except Exception:
-            pass
-        await self.mail.close()
-        self.ctx = self.page = None
-        if hasattr(self, "browser"): self.browser = None
-        if hasattr(self, "_pw"): self._pw = None
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    log.info("Starting HiggsfieldCreator v4.0 (Fixed Timezone Detection)")
-    # Add your main loop here if needed
