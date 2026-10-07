@@ -10,12 +10,14 @@ import aiohttp
 
 log = logging.getLogger("creator")
 HIGGS = "https://higgsfield.ai"
-SIGNUP = f"{HIGGS}/"
-LOGIN = f"{HIGGS}/login"
-CREATE = f"{HIGGS}/create"
-GENJUTSU = f"{HIGGS}/genjutsu"
-DEBUG_DIR = Path(os.getenv("DEBUG_DIR", "/tmp/debug")); DEBUG_DIR.mkdir(parents=True, exist_ok=True)
-VIDEO_DIR = Path(os.getenv("VIDEO_DIR", "/tmp/videos")); VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+SIGNUP = HIGGS + "/"
+LOGIN = HIGGS + "/login"
+CREATE = HIGGS + "/create"
+GENJUTSU = HIGGS + "/genjutsu"
+DEBUG_DIR = Path(os.getenv("DEBUG_DIR", "/tmp/debug"))
+DEBUG_DIR.mkdir(parents=True, exist_ok=True)
+VIDEO_DIR = Path(os.getenv("VIDEO_DIR", "/tmp/videos"))
+VIDEO_DIR.mkdir(parents=True, exist_ok=True)
 PROXY_LIST = [p.strip() for p in os.getenv("PROXY_LIST", "").split(",") if p.strip()]
 HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
 RUN_TIMEOUT = int(os.getenv("RUN_TIMEOUT", "900"))
@@ -75,59 +77,60 @@ class FingerprintRandomizer:
         self.audio_noise = random.uniform(0.00001, 0.0001)
 
     def stealth_script(self) -> str:
-        # Fixed: Use .format() instead of f-string to avoid brace conflicts
-        script = """
-        Object.defineProperty(navigator,'webdriver',{get:()=>undefined});
-        Object.defineProperty(navigator,'languages',{get:()=>{languages}});
-        Object.defineProperty(navigator,'platform',{get:()=>'{platform}'});
-        Object.defineProperty(navigator,'hardwareConcurrency',{get:()=>{hw_concurrency}});
-        Object.defineProperty(navigator,'deviceMemory',{get:()=>{device_memory}});
-        Object.defineProperty(navigator,'plugins',{get:()=>[{name:'Chrome PDF Plugin'},{name:'Chrome PDF Viewer'}]});
-        Object.defineProperty(navigator,'doNotTrack',{get:()=>'1'});
-        Object.defineProperty(navigator,'maxTouchPoints',{get:()=>0});
+        # Use string concatenation to avoid f-string issues with JS braces
+        parts = []
+        parts.append("Object.defineProperty(navigator,'webdriver',{get:()=>undefined});")
+        parts.append("Object.defineProperty(navigator,'languages',{get:()=>" + str(self.languages) + "});")
+        parts.append("Object.defineProperty(navigator,'platform',{get:()=>'" + self.platform + "'});")
+        parts.append("Object.defineProperty(navigator,'hardwareConcurrency',{get:()=>" + str(self.hw_concurrency) + "});")
+        parts.append("Object.defineProperty(navigator,'deviceMemory',{get:()=>" + str(self.device_memory) + "});")
+        parts.append("Object.defineProperty(navigator,'plugins',{get:()=>[{name:'Chrome PDF Plugin'},{name:'Chrome PDF Viewer'}]});")
+        parts.append("Object.defineProperty(navigator,'doNotTrack',{get:()=>'1'});")
+        parts.append("Object.defineProperty(navigator,'maxTouchPoints',{get:()=>0});")
+        
+        canvas_noise_val = int(self.canvas_noise * 255)
+        parts.append("""
         const _td=HTMLCanvasElement.prototype.toDataURL;
         HTMLCanvasElement.prototype.toDataURL=function(...a){
             const c=this.getContext('2d');
             if(c){
                 const d=c.getImageData(0,0,this.width,this.height);
-                for(let i=0;i<d.data.length;i+=4)d.data[i]^={canvas_noise_int};
+                for(let i=0;i<d.data.length;i+=4)d.data[i]^=""" + str(canvas_noise_val) + """;
                 c.putImageData(d,0,0)
             }
             return _td.apply(this,a)
-        };
+        };""")
+        
+        parts.append("""
         const _gp=WebGLRenderingContext.prototype.getParameter;
         WebGLRenderingContext.prototype.getParameter=function(p){
-            if(p===37445)return'{webgl_vendor}';
-            if(p===37446)return'{webgl_renderer}';
+            if(p===37445)return'""" + self.webgl_vendor + """';
+            if(p===37446)return'""" + self.webgl_renderer + """';
             return _gp.call(this,p)
-        };
+        };""")
+        
+        parts.append("""
         const _co=AudioContext.prototype.createOscillator;
         AudioContext.prototype.createOscillator=function(){
             const o=_co.call(this);
             const _cn=o.connect.bind(o);
             o.connect=function(d){
-                if(d.gain)d.gain.value*=(1+{audio_noise});
+                if(d.gain)d.gain.value*=(1+""" + str(self.audio_noise) + """);
                 return _cn(d)
             };
             return o
-        };
-        window.chrome={runtime:{}};
+        };""")
+        
+        parts.append("window.chrome={runtime:{}};")
+        
+        parts.append("""
         const _q=navigator.permissions.query;
         navigator.permissions.query=function(p){
-            if(p.name==='notifications')return Promise.resolve({{state:'prompt'}});
+            if(p.name==='notifications')return Promise.resolve({state:'prompt'});
             return _q.call(this,p)
-        };
-        """
-        return script.format(
-            languages=self.languages,
-            platform=self.platform,
-            hw_concurrency=self.hw_concurrency,
-            device_memory=self.device_memory,
-            canvas_noise_int=int(self.canvas_noise * 255),
-            webgl_vendor=self.webgl_vendor,
-            webgl_renderer=self.webgl_renderer,
-            audio_noise=self.audio_noise
-        )
+        };""")
+        
+        return "".join(parts)
 
 class HumanInput:
     @staticmethod
@@ -150,15 +153,18 @@ class HumanInput:
             el = page.locator(selector).first
             box = await el.bounding_box()
             if not box:
-                await el.click(); return
+                await el.click()
+                return
             tx = box["x"] + box["width"] * random.uniform(0.3, 0.7)
             ty = box["y"] + box["height"] * random.uniform(0.3, 0.7)
             await HumanInput.human_move(page, tx, ty, steps=random.randint(15, 30))
             await asyncio.sleep(random.uniform(0.1, 0.3))
             await page.mouse.click(tx, ty)
         except Exception:
-            try: await el.click()
-            except Exception: pass
+            try:
+                await el.click()
+            except Exception:
+                pass
 
     @staticmethod
     async def human_type(page, selector, text):
@@ -170,8 +176,10 @@ class HumanInput:
                 await page.keyboard.type(char)
                 await asyncio.sleep(random.uniform(0.08, 0.25))
         except Exception:
-            try: await el.fill(text)
-            except Exception: pass
+            try:
+                await el.fill(text)
+            except Exception:
+                pass
 
 async def human_delay(lo=None, hi=None):
     if lo is not None and hi is not None:
@@ -179,7 +187,7 @@ async def human_delay(lo=None, hi=None):
     else:
         await asyncio.sleep(random.uniform(MIN_ACTION_DELAY, MAX_ACTION_DELAY))
 
-async def pick_proxy() -> Optional[str]:
+async def pick_proxy():
     return await PROXY_POOL.next()
 
 async def global_account_delay():
@@ -188,19 +196,19 @@ async def global_account_delay():
         elapsed = time.time() - _last_account_time
         if elapsed < GLOBAL_ACCOUNT_DELAY:
             wait = GLOBAL_ACCOUNT_DELAY - elapsed + random.uniform(0, 150)
-            log.info(f"global account delay: sleeping {wait:.0f}s")
+            log.info("global account delay: sleeping %.0fs" % wait)
             await asyncio.sleep(wait)
     _last_account_time = time.time()
 
-def random_password() -> str:
+def random_password():
     return "".join(random.choices(_string.ascii_letters + _string.digits + "!@#$%", k=16))
 
-def random_name() -> tuple[str, str]:
+def random_name():
     f = ["Alex","Jordan","Sam","Casey","Riley","Quinn","Avery","Drew"]
     l = ["Carter","Brooks","Reyes","Pierce","Hayes","Cole","Lane","Vega"]
     return random.choice(f), random.choice(l)
 
-async def click_any(scope, selectors, timeout=15000) -> bool:
+async def click_any(scope, selectors, timeout=15000):
     hi = HumanInput()
     for sel in selectors:
         try:
@@ -212,7 +220,7 @@ async def click_any(scope, selectors, timeout=15000) -> bool:
             continue
     return False
 
-async def fill_any(scope, value, selectors, timeout=15000) -> bool:
+async def fill_any(scope, value, selectors, timeout=15000):
     hi = HumanInput()
     for sel in selectors:
         try:
@@ -224,7 +232,7 @@ async def fill_any(scope, value, selectors, timeout=15000) -> bool:
             continue
     return False
 
-async def wait_any(page, selectors, timeout=30000) -> bool:
+async def wait_any(page, selectors, timeout=30000):
     for sel in selectors:
         try:
             if await page.locator(sel).first.wait_for(state="visible", timeout=timeout):
@@ -233,7 +241,7 @@ async def wait_any(page, selectors, timeout=30000) -> bool:
             continue
     return False
 
-async def detect_captcha(page) -> bool:
+async def detect_captcha(page):
     caps = ['iframe[src*="captcha"]', 'iframe[src*="hcaptcha"]', 'iframe[src*="recaptcha"]',
             'div:has-text("Verify you are human")', '#cf-challenge', '.cf-turnstile', '[data-sitekey]']
     for sel in caps:
@@ -244,7 +252,7 @@ async def detect_captcha(page) -> bool:
             continue
     return False
 
-async def _find_settings_scope(page) -> Locator:
+async def _find_settings_scope(page):
     containers = ['[role="dialog"]', '[aria-modal="true"]', '.settings-panel',
                   '.modal', '[class*="settings" i]', 'main', 'body']
     for c in containers:
@@ -256,26 +264,28 @@ async def _find_settings_scope(page) -> Locator:
             continue
     return page
 
-async def select_menu_option(page, row_label, option_text, log_cb=None) -> bool:
+async def select_menu_option(page, row_label, option_text, log_cb=None):
     scope = await _find_settings_scope(page)
-    row_sels = [f'button:has-text("{row_label}")', f'[role="button"]:has-text("{row_label")',
-                f'div:has-text("{row_label}") >> nth=0', f'text="{row_label}"']
+    row_sels = ['button:has-text("%s")' % row_label, '[role="button"]:has-text("%s")' % row_label,
+                'div:has-text("%s") >> nth=0' % row_label, 'text="%s"' % row_label]
     opened = await click_any(scope, row_sels, timeout=8000)
-    if not opened and log_cb: await log_cb("warn", f"could not open '{row_label}' row")
+    if not opened and log_cb:
+        await log_cb("warn", "could not open '%s' row" % row_label)
     await human_delay(0.4, 1.0)
-    opt_sels = [f'[role="option"]:has-text("{option_text}")', f'li:has-text("{option_text}")',
-                f'div[role="menuitem"]:has-text("{option_text}")', f'button:has-text("{option_text}")',
-                f'div:has-text("{option_text}") >> nth=0', f'text="{option_text}"']
+    opt_sels = ['[role="option"]:has-text("%s")' % option_text, 'li:has-text("%s")' % option_text,
+                'div[role="menuitem"]:has-text("%s")' % option_text, 'button:has-text("%s")' % option_text,
+                'div:has-text("%s") >> nth=0' % option_text, 'text="%s"' % option_text]
     picked = await click_any(page, opt_sels, timeout=8000)
-    if not picked and log_cb: await log_cb("warn", f"could not pick '{option_text}' from '{row_label}'")
+    if not picked and log_cb:
+        await log_cb("warn", "could not pick '%s' from '%s'" % (option_text, row_label))
     return picked
 
-async def ensure_toggle_on(page, label_text, log_cb=None) -> bool:
+async def ensure_toggle_on(page, label_text, log_cb=None):
     scope = await _find_settings_scope(page)
-    sw_sels = [f'div:has-text("{label_text}") >> [role="switch"]',
-               f'div:has-text("{label_text}") >> button[role="switch"]',
-               f'div:has-text("{label_text}") >> [aria-checked]',
-               f'div:has-text("{label_text}") >> button[type="button"]:has(svg)']
+    sw_sels = ['div:has-text("%s") >> [role="switch"]' % label_text,
+               'div:has-text("%s") >> button[role="switch"]' % label_text,
+               'div:has-text("%s") >> [aria-checked]' % label_text,
+               'div:has-text("%s") >> button[type="button"]:has(svg)' % label_text]
     for sel in sw_sels:
         try:
             sw = scope.locator(sel).first
@@ -285,20 +295,24 @@ async def ensure_toggle_on(page, label_text, log_cb=None) -> bool:
             data_state = await sw.get_attribute("data-state")
             is_on = (checked == "true") or (data_state == "checked")
             if is_on:
-                if log_cb: await log_cb("info", f"'{label_text}' already ON")
+                if log_cb:
+                    await log_cb("info", "'%s' already ON" % label_text)
                 return True
-            await sw.click(); await human_delay(0.3, 0.8)
-            if log_cb: await log_cb("ok", f"'{label_text}' toggled ON")
+            await sw.click()
+            await human_delay(0.3, 0.8)
+            if log_cb:
+                await log_cb("ok", "'%s' toggled ON" % label_text)
             return True
         except Exception:
             continue
-    if log_cb: await log_cb("warn", f"could not locate toggle '{label_text}'")
+    if log_cb:
+        await log_cb("warn", "could not locate toggle '%s'" % label_text)
     return False
 
-async def get_proxy_location(proxy_url: str) -> str:
+async def get_proxy_location(proxy_url):
     """Detect proxy location to set correct timezone and avoid fingerprint mismatch."""
     try:
-        log.info(f"Detecting proxy location for: {proxy_url}")
+        log.info("Detecting proxy location for: %s" % proxy_url)
         proxy_dict = {
             "http": proxy_url,
             "https": proxy_url
@@ -307,11 +321,11 @@ async def get_proxy_location(proxy_url: str) -> str:
         async with aiohttp.ClientSession() as session:
             async with session.get('https://ipinfo.io/json', proxy=proxy_dict, timeout=10) as resp:
                 if resp.status != 200:
-                    log.warning(f"ipinfo.io returned status {resp.status}")
+                    log.warning("ipinfo.io returned status %d" % resp.status)
                     return "America/New_York"
                 data = await resp.json()
                 country = data.get('country', 'US')
-                log.info(f"Proxy detected as located in: {country}")
+                log.info("Proxy detected as located in: %s" % country)
                 
                 if country == 'DE': return 'Europe/Berlin'
                 if country == 'GB': return 'Europe/London'
@@ -340,7 +354,7 @@ async def get_proxy_location(proxy_url: str) -> str:
                 if country == 'PL': return 'Europe/Warsaw'
                 if country == 'UA': return 'Europe/Kiev'
                 if country == 'TR': return 'Europe/Istanbul'
-                if country == 'IL': return 'Asia/J Jerusalem'
+                if country == 'IL': return 'Asia/Jerusalem'
                 if country == 'AE': return 'Asia/Dubai'
                 if country == 'SA': return 'Asia/Riyadh'
                 if country == 'EG': return 'Africa/Cairo'
@@ -359,10 +373,10 @@ async def get_proxy_location(proxy_url: str) -> str:
                 if country == 'VE': return 'America/Caracas'
                 if country == 'US': return 'America/New_York'
                 
-                log.warning(f"Country {country} not explicitly mapped, defaulting to America/New_York")
+                log.warning("Country %s not explicitly mapped, defaulting to America/New_York" % country)
                 return 'America/New_York'
     except Exception as e:
-        log.error(f"Could not detect proxy location: {e}")
+        log.error("Could not detect proxy location: %s" % str(e))
         log.warning("Defaulting to America/New_York. If proxy is not US-based, this may cause Cloudflare blocks.")
         return 'America/New_York'
 
@@ -370,27 +384,30 @@ class HiggsfieldCreator:
     def __init__(self, log_cb=None):
         self.log_cb = log_cb
         self.mail = TempMail()
-        self.email = ""; self.password = random_password()
+        self.email = ""
+        self.password = random_password()
         self.first, self.last = random_name()
-        self.ctx = None; self.page = None
-        self.proxy: Optional[str] = None
+        self.ctx = None
+        self.page = None
+        self.proxy = None
         self.reused_account = False
         self.fp = None
         self.hi = HumanInput()
 
     async def _log(self, level, msg):
-        log.info(f"[{level}] {msg}")
-        if self.log_cb: await self.log_cb(level, msg)
+        log.info("[%s] %s" % (level, msg))
+        if self.log_cb:
+            await self.log_cb(level, msg)
 
     async def _shot(self, tag):
         try:
-            p = DEBUG_DIR / f"{tag}_{random.randint(1000,9999)}.png"
+            p = DEBUG_DIR / ("{}_{}.png".format(tag, random.randint(1000,9999)))
             await self.page.screenshot(path=str(p), full_page=True)
-            await self._log("info", f"debug screenshot: {p}")
+            await self._log("info", "debug screenshot: %s" % p)
         except Exception:
             pass
 
-    async def _detect_cloudflare(self) -> bool:
+    async def _detect_cloudflare(self):
         cf_sels = [
             'text="Checking your browser"',
             'text="Just a moment"',
@@ -409,7 +426,7 @@ class HiggsfieldCreator:
                 continue
         return False
 
-    async def _diagnose_page(self, tag: str) -> None:
+    async def _diagnose_page(self, tag):
         try:
             title = await self.page.title()
             url = self.page.url
@@ -419,14 +436,13 @@ class HiggsfieldCreator:
             body = await self.page.evaluate("() => document.body ? document.body.innerText.slice(0, 300) : 'BODY_NOT_FOUND'")
             await self._log(
                 "info",
-                f"{tag}: url={url} title={title!r} "
-                f"inputs={n_inputs} textareas={n_textareas} iframes={n_iframes}",
+                "%s: url=%s title=%r inputs=%d textareas=%d iframes=%d" % (tag, url, title, n_inputs, n_textareas, n_iframes),
             )
-            await self._log("info", f"{tag}: body starts {body!r}")
+            await self._log("info", "%s: body starts %r" % (tag, body))
         except Exception as exc:
-            await self._log("warn", f"{tag}: could not inspect page: {exc}")
+            await self._log("warn", "%s: could not inspect page: %s" % (tag, str(exc)))
 
-    async def _dismiss_cookie_banner(self) -> bool:
+    async def _dismiss_cookie_banner(self):
         sels = [
             'button:has-text("Accept all")',
             'button:has-text("Accept All")',
@@ -444,7 +460,7 @@ class HiggsfieldCreator:
                 if await loc.is_visible(timeout=1500):
                     await loc.click()
                     await human_delay(0.6, 1.4)
-                    await self._log("ok", f"dismissed cookie banner ({sel})")
+                    await self._log("ok", "dismissed cookie banner (%s)" % sel)
                     return True
             except Exception:
                 continue
@@ -456,7 +472,7 @@ class HiggsfieldCreator:
             await asyncio.sleep(random.uniform(0.5, 2.0))
         await asyncio.sleep(random.uniform(0.5, 1.5))
 
-    async def run(self, reference_path, prompt, image_paths: list[Path] | None = None) -> Path:
+    async def run(self, reference_path, prompt, image_paths=None):
         self._image_paths = image_paths or []
         try:
             return await asyncio.wait_for(
@@ -464,38 +480,41 @@ class HiggsfieldCreator:
             )
         except asyncio.TimeoutError:
             await self._cleanup()
-            raise RuntimeError(f"generation exceeded {RUN_TIMEOUT}s overall timeout")
+            raise RuntimeError("generation exceeded %ds overall timeout" % RUN_TIMEOUT)
 
-    async def _run_with_retries(self, reference_path, prompt) -> Path:
+    async def _run_with_retries(self, reference_path, prompt):
         last_err = None
         for attempt in range(1, 4):
             try:
-                await self._log("info", f"attempt {attempt}/3")
+                await self._log("info", "attempt %d/3" % attempt)
                 result = await self._attempt(reference_path, prompt)
                 if self.proxy:
                     await PROXY_POOL.reset_failure(self.proxy)
                 return result
             except Exception as e:
                 last_err = e
-                await self._log("warn", f"attempt {attempt} failed: {e}")
+                await self._log("warn", "attempt %d failed: %s" % (attempt, str(e)))
                 if self.proxy and not self.reused_account:
                     await PROXY_POOL.record_failure(self.proxy)
-                    await self._log("info", f"proxy {self.proxy.split('@')[0]}@*** marked failed, will retry with different proxy")
-                if self.page: await self._shot(f"fail_attempt{attempt}")
+                    proxy_part = self.proxy.split('@')[0] if '@' in self.proxy else 'unknown'
+                    await self._log("info", "proxy %s@*** marked failed, will retry with different proxy" % proxy_part)
+                if self.page:
+                    await self._shot("fail_attempt%d" % attempt)
                 await self._cleanup()
                 backoff = min(60 * (2 ** (attempt - 1)), 180)
-                await self._log("info", f"backoff: sleeping {backoff}s before retry")
+                await self._log("info", "backoff: sleeping %ds before retry" % backoff)
                 await asyncio.sleep(backoff)
         await self._cleanup()
-        raise RuntimeError(f"all 3 attempts failed: {last_err}")
+        raise RuntimeError("all 3 attempts failed: %s" % str(last_err))
 
-    async def _attempt(self, reference_path, prompt) -> Path:
+    async def _attempt(self, reference_path, prompt):
         acct = await get_account_with_credits()
         if acct:
-            self.email = acct["email"]; self.password = acct["password"]
+            self.email = acct["email"]
+            self.password = acct["password"]
             self.proxy = acct.get("proxy")
             self.reused_account = True
-            await self._log("info", f"reusing account {self.email} (proxy={self.proxy or 'none'})")
+            await self._log("info", "reusing account %s (proxy=%s)" % (self.email, self.proxy or 'none'))
         else:
             await global_account_delay()
             self.proxy = await pick_proxy()
@@ -505,13 +524,14 @@ class HiggsfieldCreator:
         if self.proxy:
             proxy_tz = await get_proxy_location(self.proxy)
         
-        await self._log("info", f"launching browser (proxy={'yes' if self.proxy else 'no'}, pool={PROXY_POOL.size}, tz={proxy_tz})")
+        await self._log("info", "launching browser (proxy=%s, pool=%d, tz=%s)" % ('yes' if self.proxy else 'no', PROXY_POOL.size, proxy_tz))
         
         self.fp = FingerprintRandomizer(timezone_id=proxy_tz)
 
         self._pw = await async_playwright().start()
         launch_args = {"headless": HEADLESS, "args": list(BROWSER_ARGS)}
-        if self.proxy: launch_args["proxy"] = {"server": self.proxy}
+        if self.proxy:
+            launch_args["proxy"] = {"server": self.proxy}
         self.browser = await self._pw.chromium.launch(**launch_args)
         self.ctx = await self.browser.new_context(
             viewport=self.fp.resolution,
@@ -527,18 +547,18 @@ class HiggsfieldCreator:
         await self._login()
         await self._run_genjutsu(reference_path, prompt)
         await mark_used(self.email, 0)
-        await self._log("ok", f"account {self.email} marked used (credits=0)")
+        await self._log("ok", "account %s marked used (credits=0)" % self.email)
         return await self._download_result()
 
     async def _create_account(self):
         self.email = await self.mail.create()
-        await self._log("info", f"temp inbox ready: {self.email}")
+        await self._log("info", "temp inbox ready: %s" % self.email)
         try:
             await self.page.goto(SIGNUP, wait_until="domcontentloaded", timeout=180000)
             await self.page.wait_for_load_state("networkidle")
             await asyncio.sleep(random.uniform(3, 6))
         except Exception as e:
-            await self._log("warn", f"goto failed: {e}")
+            await self._log("warn", "goto failed: %s" % str(e))
             raise
 
         if await self._detect_cloudflare():
@@ -560,7 +580,7 @@ class HiggsfieldCreator:
                     raise RuntimeError("Peak returned no token for signup challenge.")
             except Exception as e:
                 await self._shot("cloudflare_solve_failed_signup")
-                raise RuntimeError(f"Failed to solve Cloudflare challenge on signup: {e}")
+                raise RuntimeError("Failed to solve Cloudflare challenge on signup: %s" % str(e))
         else:
             await self._log("info", "No Cloudflare challenge detected on signup page. Proceeding.")
 
@@ -580,7 +600,6 @@ class HiggsfieldCreator:
         if not signup_clicked:
              if "login" in self.page.url:
                  await self._log("info", "On login page, attempting to find signup link...")
-                 pass
         
         await human_delay(1, 2)
         
@@ -605,29 +624,33 @@ class HiggsfieldCreator:
         await human_delay()
         ok = await fill_any(self.page, self.password, ['input[type="password"]', 'input[name="password"]',
             'input[placeholder*="password" i]'])
-        if not ok: raise RuntimeError("password field not found on signup")
+        if not ok:
+            raise RuntimeError("password field not found on signup")
         await human_delay()
         await click_any(self.page, ['input[type="checkbox"]', '[role="checkbox"]'], timeout=3000)
         ok = await click_any(self.page, ['button[type="submit"]', 'button:has-text("Sign up")',
             'button:has-text("Create")', 'button:has-text("Register")', 'button:has-text("Continue")',
             'button:has-text("Get started")'])
-        if not ok: raise RuntimeError("signup submit button not found")
+        if not ok:
+            raise RuntimeError("signup submit button not found")
         await self._log("info", "signup form submitted")
         await self._log("info", "waiting for verification email...")
         link = await self.mail.wait_for_link(log=lambda m: self._log("info", m))
-        await self._log("ok", f"verification link: {link}")
-        await self.page.goto(link, wait_until="domcontentloaded", timeout=60000); await human_delay()
+        await self._log("ok", "verification link: %s" % link)
+        await self.page.goto(link, wait_until="domcontentloaded", timeout=60000)
+        await human_delay()
         if await detect_captcha(self.page):
             await self._shot("captcha_verify")
             raise RuntimeError("captcha on verification - needs a solver or manual solve")
         await self._log("ok", "email verified")
         await save_account(self.email, self.password, credits=1, proxy=self.proxy)
-        await self._log("ok", f"account saved (proxy bound: {self.proxy or 'none'})")
+        await self._log("ok", "account saved (proxy bound: %s)" % (self.proxy or 'none'))
         if self.proxy:
             await PROXY_POOL.mark_used(self.proxy)
 
     async def _login(self):
-        await self.page.goto(LOGIN, wait_until="domcontentloaded", timeout=60000); await human_delay()
+        await self.page.goto(LOGIN, wait_until="domcontentloaded", timeout=60000)
+        await human_delay()
         if await detect_captcha(self.page):
             await self._shot("captcha_login")
             raise RuntimeError("captcha on login - needs a solver or manual solve")
@@ -641,17 +664,17 @@ class HiggsfieldCreator:
         if "/login" in self.page.url:
             if self.reused_account:
                 await mark_banned(self.email)
-                await self._log("warn", f"account {self.email} marked BANNED (login failed)")
+                await self._log("warn", "account %s marked BANNED (login failed)" % self.email)
             raise RuntimeError("login failed - still on /login (bad creds or banned)")
         await self._log("ok", "logged in")
 
     async def _run_genjutsu(self, reference_path, prompt):
         resp = await self.page.goto(CREATE, wait_until="domcontentloaded", timeout=60000)
         if resp and resp.status >= 400:
-            await self._log("info", f"/create returned {resp.status}, falling back to /genjutsu")
+            await self._log("info", "/create returned %d, falling back to /genjutsu" % resp.status)
             await self.page.goto(GENJUTSU, wait_until="domcontentloaded", timeout=60000)
         await human_delay()
-        await self._log("info", f"navigated to create interface ({self.page.url})")
+        await self._log("info", "navigated to create interface (%s)" % self.page.url)
         if await detect_captcha(self.page):
             await self._shot("captcha_create")
             raise RuntimeError("captcha on create page - needs a solver or manual solve")
@@ -669,7 +692,7 @@ class HiggsfieldCreator:
         await asyncio.sleep(random.uniform(15, 40))
         file_inputs = self.page.locator('input[type="file"]')
         count = await file_inputs.count()
-        await self._log("info", f"found {count} file input(s) on create page")
+        await self._log("info", "found %d file input(s) on create page" % count)
         video_uploaded = False
         for i in range(count):
             inp = file_inputs.nth(i)
@@ -677,7 +700,7 @@ class HiggsfieldCreator:
             if "video" in accept or "video" not in accept:
                 try:
                     await inp.set_input_files(reference_path)
-                    await self._log("info", f"reference video uploaded to input #{i}")
+                    await self._log("info", "reference video uploaded to input #%d" % i)
                     video_uploaded = True
                     break
                 except Exception:
@@ -695,7 +718,7 @@ class HiggsfieldCreator:
                 if "image" in accept:
                     try:
                         await inp.set_input_files([str(p) for p in self._image_paths])
-                        await self._log("info", f"{len(self._image_paths)} reference image(s) uploaded to input #{i}")
+                        await self._log("info", "%d reference image(s) uploaded to input #%d" % (len(self._image_paths), i))
                         img_uploaded = True
                         break
                     except Exception:
@@ -703,7 +726,7 @@ class HiggsfieldCreator:
             if not img_uploaded and count > 1:
                 try:
                     await file_inputs.nth(1).set_input_files([str(p) for p in self._image_paths])
-                    await self._log("info", f"{len(self._image_paths)} reference image(s) uploaded (input #1)")
+                    await self._log("info", "%d reference image(s) uploaded (input #1)" % len(self._image_paths))
                     img_uploaded = True
                 except Exception:
                     pass
@@ -713,50 +736,59 @@ class HiggsfieldCreator:
         ok = await fill_any(self.page, prompt, ['textarea[name="prompt"]',
             'textarea[placeholder*="prompt" i]', 'textarea[placeholder*="describe" i]',
             'textarea[placeholder*="scene" i]', 'textarea'])
-        if not ok: raise RuntimeError("prompt textarea not found")
+        if not ok:
+            raise RuntimeError("prompt textarea not found")
         await self._log("info", "prompt filled")
         await human_delay()
         ok = await click_any(self.page, ['button:has-text("Generate")', 'button:has-text("Create")',
             'button:has-text("Render")', 'button[type="submit"]', 'button:has-text("Make")'])
-        if not ok: raise RuntimeError("generate button not found")
+        if not ok:
+            raise RuntimeError("generate button not found")
         await self._log("ok", "generation triggered")
         await self._log("info", "waiting for generation to complete...")
         done = await wait_any(self.page, ['video[src]', 'a[download]', 'button:has-text("Download")',
             'button:has-text("Save")', 'button:has-text("Download video")'], timeout=300000)
-        if not done: raise RuntimeError("generation did not complete in time")
+        if not done:
+            raise RuntimeError("generation did not complete in time")
         await self._log("ok", "generation complete")
 
-    async def _download_result(self) -> Path:
-        out = VIDEO_DIR / f"genjutsu_{random.randint(10000,99999)}.mp4"
+    async def _download_result(self):
+        out = VIDEO_DIR / ("genjutsu_%d.mp4" % random.randint(10000,99999))
         try:
             async with self.page.expect_download(timeout=60000) as dl_info:
                 ok = await click_any(self.page, ['a[download]', 'button:has-text("Download")',
                     'button:has-text("Save video")', 'button:has-text("Download video")'])
-                if not ok: raise RuntimeError("no download button")
+                if not ok:
+                    raise RuntimeError("no download button")
             download = await dl_info.value
             await download.save_as(str(out))
-            await self._log("ok", f"video saved: {out.name}")
+            await self._log("ok", "video saved: %s" % out.name)
         except Exception:
             src = await self.page.locator('video').first.get_attribute("src")
             if not src:
                 raise RuntimeError("could not locate result video")
-            url = src if src.startswith("http") else f"{HIGGS}{src}"
+            url = src if src.startswith("http") else HIGGS + src
             resp = await self.page.request.get(url)
             if resp.ok:
                 out.write_bytes(await resp.body())
-                await self._log("ok", f"video fetched via src: {out.name}")
+                await self._log("ok", "video fetched via src: %s" % out.name)
             else:
-                raise RuntimeError(f"video fetch failed: HTTP {resp.status}")
+                raise RuntimeError("video fetch failed: HTTP %d" % resp.status)
         return out
 
     async def _cleanup(self):
         try:
-            if self.ctx: await self.ctx.close()
-            if getattr(self, "browser", None): await self.browser.close()
-            if getattr(self, "_pw", None): await self._pw.stop()
+            if self.ctx:
+                await self.ctx.close()
+            if getattr(self, "browser", None):
+                await self.browser.close()
+            if getattr(self, "_pw", None):
+                await self._pw.stop()
         except Exception:
             pass
         await self.mail.close()
         self.ctx = self.page = None
-        if hasattr(self, "browser"): self.browser = None
-        if hasattr(self, "_pw"): self._pw = None
+        if hasattr(self, "browser"):
+            self.browser = None
+        if hasattr(self, "_pw"):
+            self._pw = None
