@@ -509,9 +509,17 @@ class HiggsfieldCreator:
         
         # The consent dialog covers the form until accepted.
         await self._dismiss_cookie_banner()
-        # NEW: Click the Sign up button on the homepage
+        # NEW: Click the Sign up button on the homepage, scoped to the header/nav bar
         await self._log("info", "clicking Sign up button...")
-        await click_any(self.page, ['button:has-text("Sign up")', 'a:has-text("Sign up")', 'text="Sign up"'])
+        await click_any(self.page, [
+            'header button:has-text("Sign up")',
+            'header a:has-text("Sign up")',
+            'nav button:has-text("Sign up")',
+            'nav a:has-text("Sign up")',
+            'button:has-text("Sign up")',
+            'a:has-text("Sign up")',
+            'text="Sign up"'
+        ], timeout=10000)
         await human_delay(1, 2)
         # Cloudflare detection
         if await self._detect_cloudflare():
