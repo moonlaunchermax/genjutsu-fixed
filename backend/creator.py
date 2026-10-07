@@ -27,7 +27,7 @@ from proxy_manager import ProxyManager, load_proxy_list, COOLDOWN_SECONDS
 
 log = logging.getLogger("creator")
 HIGGS = "https://higgsfield.ai"
-SIGNUP = f"{HIGGS}/signup"
+SIGNUP = f"{HIGGS}/"
 LOGIN = f"{HIGGS}/login"
 CREATE = f"{HIGGS}/create"
 GENJUTSU = f"{HIGGS}/genjutsu"
@@ -498,6 +498,10 @@ class HiggsfieldCreator:
             await self._log("info", "signup: networkidle not reached within 15s, continuing")
         # The consent dialog covers the form until accepted.
         await self._dismiss_cookie_banner()
+              # NEW: Click the Sign up button on the homepage
+        await self._log("info", "clicking Sign up button...")
+        await click_any(self.page, ['button:has-text("Sign up")', 'a:has-text("Sign up")', 'text="Sign up"'])
+        await human_delay(1, 2)
         # Cloudflare detection
         if await self._detect_cloudflare():
             await self._shot("cloudflare_signup")
