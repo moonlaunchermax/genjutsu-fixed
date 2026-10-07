@@ -486,16 +486,13 @@ class HiggsfieldCreator:
         await self._log("ok", f"account {self.email} marked used (credits=0)")
         return await self._download_result()
 
-    async def _create_account(self):
+        async def _create_account(self):
         self.email = await self.mail.create()
         await self._log("info", f"temp inbox ready: {self.email}")
-        await self.page.goto(SIGNUP, wait_until="domcontentloaded", timeout=180000); await human_delay()
-        # The site is a client-rendered SPA: domcontentloaded fires before React
-        # has mounted the form. Best-effort wait, but never hang on it.
-        try:
-            await self.page.wait_for_load_state("networkidle", timeout=15000)
-        except Exception:
-            await self._log("info", "signup: networkidle not reached within 15s, continuing")
+        await self.page.goto(SIGNUP, wait_until="commit", timeout=180000)
+        await self.page.wait_for_timeout(15000)
+        await human_delay()
+        
         # The consent dialog covers the form until accepted.
         await self._dismiss_cookie_banner()
               # NEW: Click the Sign up button on the homepage
