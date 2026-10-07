@@ -43,7 +43,7 @@ RUN_TIMEOUT = int(os.getenv("RUN_TIMEOUT", "900"))
 # The remaining flags cap renderer memory so a 512 MB instance survives.
 BROWSER_ARGS = [
     "--disable-blink-features=AutomationControlled",
-    "--excludeSwitches", "enable-automation",
+    "--excludeSwitches=enable-automation",
     "--no-sandbox",
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
