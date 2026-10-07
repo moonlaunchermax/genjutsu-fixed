@@ -11,3 +11,4 @@ python-multipart==0.0.9
 # which is the entire point of this tool) and knows the newer distros.
 playwright==1.63.0
 pydantic==2.7.0
+playwright-turnstile
