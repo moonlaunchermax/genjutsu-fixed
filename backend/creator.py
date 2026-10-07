@@ -485,8 +485,7 @@ class HiggsfieldCreator:
         await mark_used(self.email, 0)
         await self._log("ok", f"account {self.email} marked used (credits=0)")
         return await self._download_result()
-
-        async def _create_account(self):
+          async def _create_account(self):
         self.email = await self.mail.create()
         await self._log("info", f"temp inbox ready: {self.email}")
         await self.page.goto(SIGNUP, wait_until="commit", timeout=180000)
@@ -495,7 +494,7 @@ class HiggsfieldCreator:
         
         # The consent dialog covers the form until accepted.
         await self._dismiss_cookie_banner()
-              # NEW: Click the Sign up button on the homepage
+        # NEW: Click the Sign up button on the homepage
         await self._log("info", "clicking Sign up button...")
         await click_any(self.page, ['button:has-text("Sign up")', 'a:has-text("Sign up")', 'text="Sign up"'])
         await human_delay(1, 2)
@@ -549,146 +548,3 @@ class HiggsfieldCreator:
         # Mark proxy as used (triggers 45 min cooldown)
         if self.proxy:
             await PROXY_POOL.mark_used(self.proxy)
-
-    async def _login(self):
-        await self.page.goto(LOGIN, wait_until="domcontentloaded", timeout=60000); await human_delay()
-        if await detect_captcha(self.page):
-            await self._shot("captcha_login")
-            raise RuntimeError("captcha on login - needs a solver or manual solve")
-        await fill_any(self.page, self.email, ['input[type="email"]', 'input[name="email"]',
-            'input[placeholder*="email" i]'])
-        await human_delay()
-        await fill_any(self.page, self.password, ['input[type="password"]', 'input[name="password"]'])
-        await click_any(self.page, ['button[type="submit"]', 'button:has-text("Log in")',
-            'button:has-text("Sign in")'])
-        await self.page.wait_for_load_state("networkidle")
-        # Bug B fix: verify login succeeded; mark reused account banned if it failed
-        if "/login" in self.page.url:
-            if self.reused_account:
-                await mark_banned(self.email)
-                await self._log("warn", f"account {self.email} marked BANNED (login failed)")
-            raise RuntimeError("login failed - still on /login (bad creds or banned)")
-        await self._log("ok", "logged in")
-
-    async def _run_genjutsu(self, reference_path, prompt):
-        # Bug C fix: use HTTP response status for 404 detection
-        resp = await self.page.goto(CREATE, wait_until="domcontentloaded", timeout=60000)
-        if resp and resp.status >= 400:
-            await self._log("info", f"/create returned {resp.status}, falling back to /genjutsu")
-            await self.page.goto(GENJUTSU, wait_until="domcontentloaded", timeout=60000)
-        await human_delay()
-        await self._log("info", f"navigated to create interface ({self.page.url})")
-        if await detect_captcha(self.page):
-            await self._shot("captcha_create")
-            raise RuntimeError("captcha on create page - needs a solver or manual solve")
-        # Human behavior: scroll the page before interacting
-        await self._human_scroll(scrolls=random.randint(2, 4))
-        await self._log("info", "selecting Model: Higgsfield Genjutsu")
-        await select_menu_option(self.page, "Model", "Higgsfield Genjutsu", self._log)
-        await human_delay()
-        await self._log("info", "selecting Quality: 720p")
-        await select_menu_option(self.page, "Quality", "720p", self._log)
-        await human_delay()
-        await self._log("info", "ensuring 'Use free gens' is ON")
-        await ensure_toggle_on(self.page, "Use free gens", self._log)
-        await human_delay()
-        # Human behavior: wait 15-40s before uploading reference (like a human reading the page)
-        await self._log("info", "waiting before upload (human simulation)...")
-        await asyncio.sleep(random.uniform(15, 40))
-        # Upload reference VIDEO (required) — find the video file input
-        file_inputs = self.page.locator('input[type="file"]')
-        count = await file_inputs.count()
-        await self._log("info", f"found {count} file input(s) on create page")
-        video_uploaded = False
-        for i in range(count):
-            inp = file_inputs.nth(i)
-            accept = await inp.get_attribute("accept") or ""
-            if "video" in accept or "video" not in accept:
-                try:
-                    await inp.set_input_files(reference_path)
-                    await self._log("info", f"reference video uploaded to input #{i}")
-                    video_uploaded = True
-                    break
-                except Exception:
-                    continue
-        if not video_uploaded:
-            # fallback: first file input
-            await file_inputs.first.set_input_files(reference_path)
-            await self._log("info", "reference video uploaded (fallback to first input)")
-        await human_delay(1, 2)
-
-        # Upload reference IMAGES (optional, up to 30) — find the image file input
-        if self._image_paths:
-            img_uploaded = False
-            for i in range(count):
-                inp = file_inputs.nth(i)
-                accept = await inp.get_attribute("accept") or ""
-                if "image" in accept:
-                    try:
-                        await inp.set_input_files([str(p) for p in self._image_paths])
-                        await self._log("info", f"{len(self._image_paths)} reference image(s) uploaded to input #{i}")
-                        img_uploaded = True
-                        break
-                    except Exception:
-                        continue
-            if not img_uploaded and count > 1:
-                # try the second input (first was video)
-                try:
-                    await file_inputs.nth(1).set_input_files([str(p) for p in self._image_paths])
-                    await self._log("info", f"{len(self._image_paths)} reference image(s) uploaded (input #1)")
-                    img_uploaded = True
-                except Exception:
-                    pass
-            if not img_uploaded:
-                await self._log("warn", "could not find a separate image upload input — images may not have been uploaded")
-        await human_delay(1, 2)
-        ok = await fill_any(self.page, prompt, ['textarea[name="prompt"]',
-            'textarea[placeholder*="prompt" i]', 'textarea[placeholder*="describe" i]',
-            'textarea[placeholder*="scene" i]', 'textarea'])
-        if not ok: raise RuntimeError("prompt textarea not found")
-        await self._log("info", "prompt filled")
-        await human_delay()
-        ok = await click_any(self.page, ['button:has-text("Generate")', 'button:has-text("Create")',
-            'button:has-text("Render")', 'button[type="submit"]', 'button:has-text("Make")'])
-        if not ok: raise RuntimeError("generate button not found")
-        await self._log("ok", "generation triggered")
-        await self._log("info", "waiting for generation to complete...")
-        done = await wait_any(self.page, ['video[src]', 'a[download]', 'button:has-text("Download")',
-            'button:has-text("Save")', 'button:has-text("Download video")'], timeout=300000)
-        if not done: raise RuntimeError("generation did not complete in time")
-        await self._log("ok", "generation complete")
-
-    async def _download_result(self) -> Path:
-        out = VIDEO_DIR / f"genjutsu_{random.randint(10000,99999)}.mp4"
-        try:
-            async with self.page.expect_download(timeout=60000) as dl_info:
-                ok = await click_any(self.page, ['a[download]', 'button:has-text("Download")',
-                    'button:has-text("Save video")', 'button:has-text("Download video")'])
-                if not ok: raise RuntimeError("no download button")
-            download = await dl_info.value
-            await download.save_as(str(out))
-            await self._log("ok", f"video saved: {out.name}")
-        except Exception:
-            src = await self.page.locator('video').first.get_attribute("src")
-            if not src:
-                raise RuntimeError("could not locate result video")
-            url = src if src.startswith("http") else f"{HIGGS}{src}"
-            resp = await self.page.request.get(url)
-            if resp.ok:
-                out.write_bytes(await resp.body())
-                await self._log("ok", f"video fetched via src: {out.name}")
-            else:
-                raise RuntimeError(f"video fetch failed: HTTP {resp.status}")
-        return out
-
-    async def _cleanup(self):
-        try:
-            if self.ctx: await self.ctx.close()
-            if getattr(self, "browser", None): await self.browser.close()
-            if getattr(self, "_pw", None): await self._pw.stop()
-        except Exception:
-            pass
-        await self.mail.close()
-        self.ctx = self.page = None
-        if hasattr(self, "browser"): self.browser = None
-        if hasattr(self, "_pw"): self._pw = None
