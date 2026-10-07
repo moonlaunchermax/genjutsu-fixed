@@ -489,7 +489,7 @@ class HiggsfieldCreator:
     async def _create_account(self):
         self.email = await self.mail.create()
         await self._log("info", f"temp inbox ready: {self.email}")
-        await self.page.goto(SIGNUP, wait_until="domcontentloaded", timeout=90000); await human_delay()
+        await self.page.goto(SIGNUP, wait_until="domcontentloaded", timeout=180000); await human_delay()
         # The site is a client-rendered SPA: domcontentloaded fires before React
         # has mounted the form. Best-effort wait, but never hang on it.
         try:
