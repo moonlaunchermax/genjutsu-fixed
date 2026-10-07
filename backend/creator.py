@@ -496,12 +496,25 @@ class HiggsfieldCreator:
         self.email = await self.mail.create()
         await self._log("info", f"temp inbox ready: {self.email}")
         try:
-            await self.page.goto(SIGNUP, wait_until="domcontentloaded", timeout=120000)
+            # Use "commit" to avoid hanging on Cloudflare's interstitial
+            await self.page.goto(SIGNUP, wait_until="commit", timeout=180000)
         except Exception as e:
             await self._log("warn", f"goto failed: {e}")
         
-        # Give Cloudflare and React 30 seconds to finish loading
-        await self.page.wait_for_timeout(30000)
+        # Wait for Cloudflare clearance cookie
+        await self._log("info", "Waiting for Cloudflare clearance...")
+        for _ in range(30):  # Wait up to 30 seconds
+            cookies = await self.ctx.cookies()
+            cf_clearance = [c for c in cookies if c.get("name") == "cf_clearance"]
+            if cf_clearance:
+                await self._log("ok", "Cloudflare clearance cookie obtained")
+                break
+            await asyncio.sleep(1)
+        else:
+            await self._log("warn", "No cf_clearance cookie found after 30s")
+        
+        # Give the page time to render after clearance
+        await self.page.wait_for_timeout(10000)
         
         # Simulate human mouse movement immediately after page load
         await self.hi.human_move(self.page, random.randint(200, 800), random.randint(200, 600))
